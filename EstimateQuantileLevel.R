@@ -11,10 +11,10 @@ precip <- data.frame('dates'=dates, 'X'=precipitation$X, 'Y'= precipitation$Y)
 gdp <- data.frame('dates'=GDP$date, 'X'=GDP$forecast, 'Y'=GDP$observation)
 
 #Choose data set from PointFore 'precip' or 'gdp' (formatted above) and title
-data <- precip
-ti <- 'Estimated quantile level - Precipitation London'
-#data <- gdp
-#ti <- 'Estimated quantile level - GDP'
+#data <- precip
+#ti <- 'Estimated quantile level - Precipitation London'
+data <- gdp
+ti <- 'Estimated quantile level - GDP'
 
 #Initialize variables
 T <- length(data$X)  ##data set length
@@ -41,10 +41,32 @@ for (i in seq(1, T, 1)) {
   alpha_x[i] <- alphas[max(which(quantiles[i,]<=x[i]))]
 }
 
+#Estimate quantile level with GMM pasrametrically
+res_parametric <- estimate.functional(iden.fct = PointFore::quantiles,
+                                      X = data$X,
+                                      Y = data$Y,
+                                      stateVariable = data$X,
+                                      instruments = c("lag(Y,2)", "X"),
+                                      theta0 = c(0,0),
+                                      model = probit_linear)
+
+theta1 <- summary(res_parametric)$coefficients[1,1]
+theta2 <- summary(res_parametric)$coefficients[2,1]
+
+level <- probit_linear(res_parametric$stateVariable, theta = c(theta1, theta2))
+
+#save result in data frame and reshape for ggplot
+res <- data.frame('x' = x[3:T], 'alpha_x'=alpha_x[3:T], 'level'=level)
+res <- melt(res, id.vars = c('x'))
+
 #Plot
-res <- data.frame('x' = x, 'alpha_x'=alpha_x)
-ggplot() + geom_line(data = res, aes(x=x, y=alpha_x), size=0.5) +
+ggplot() + 
+  geom_line(data = res, aes(x=x, y=value, col=variable), size=0.5) +
   #xlim(0,30) +
   ylim(0,1) +
   ylab(expression(alpha(x))) +
+  scale_color_discrete(name='Estimated quantile level', labels=c('IDR', 'GMM')) +
   ggtitle(ti)
+
+
+
