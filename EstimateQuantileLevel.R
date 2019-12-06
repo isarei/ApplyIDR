@@ -12,10 +12,10 @@ precip <- data.frame('dates'=dates, 'X'=precipitation$X, 'Y'= precipitation$Y)
 gdp <- data.frame('dates'=GDP$date, 'X'=GDP$forecast, 'Y'=GDP$observation)
 
 #Choose data set from PointFore 'precip' or 'gdp' (formatted above) and title
-data <- precip
-ti <- 'Estimated quantile level - Precipitation London'
-#data <- gdp
-#ti <- 'Estimated quantile level - GDP'
+#data <- precip
+#ti <- 'Estimated quantile level - Precipitation London'
+data <- gdp
+ti <- 'Estimated quantile level - GDP'
 
 #Initialize variables
 T <- length(data$X)  ##data set length
@@ -47,11 +47,6 @@ for (i in 1:length(x.grid)) {
   alpha_x[i] <- alpha.grid[max(which(quantiles[i,]<=x.grid[i]))]
 }
 
-
-#for each x_i (row) find max index where quantile is <= x_i and take the respective alpha
-#for (i in seq(1, T, 1)) {
-#  alpha_x[i] <- alphas[max(which(quantiles[i,]<=x[i]))]
-#}
 
 #Estimate quantile level with GMM parametrically
 res_parametric <- estimate.functional(iden.fct = PointFore::quantiles,
