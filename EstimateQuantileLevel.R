@@ -48,7 +48,6 @@ for (i in 1:length(x.grid)) {
 }
 
 
-
 #Estimate quantile level with GMM parametrically
 res_parametric <- estimate.functional(iden.fct = PointFore::quantiles,
                                       X = data$X,
