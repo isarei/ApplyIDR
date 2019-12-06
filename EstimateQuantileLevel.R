@@ -1,6 +1,7 @@
 rm(list=ls())
 
 library(PointFore)
+#devtools::install_github("AlexanderHenzi/isodistrreg", build_vignettes = TRUE)
 library(isodistrreg)
 library(tidyverse)
 
