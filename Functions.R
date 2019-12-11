@@ -182,9 +182,9 @@ plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9), hline=TRUE)
   
   #add legend
   p <-  p + scale_color_manual(name='', 
-                                values=c('alpha_x'='red', 
-                                         'alpha_gmm'='blue', 
-                                         'pdf estimate of x'='darkgreen'),
+                              values=c('alpha_x'='red', 
+                                       'alpha_gmm'='blue', 
+                                       'pdf estimate of x'='darkgreen'),
                                labels=c('alpha_gmm' = 'estimated quantile level GMM \nwith 60 and 90 percent \nconfidence intervalls',
                                         'alpha_x' = 'estimated quantile level IDR', 
                                         'pdf estimate of x' = 'pdf estimate of x')) 
