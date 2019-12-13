@@ -4,11 +4,16 @@ library(PointFore)
 library(isodistrreg)
 library(tidyverse)
 library(reshape2)
+library(car)           #for function linearHypothesis (calculate p_wald)
+library(grid)          #for adding text to plot with grob
+library(cdfquantreg)   #for function scaleTR (transformation of values to unit interval)
+library(ggnewscale)    #allows for more than one legend in plot
 
 setClass("IDR_quantiles", slots=list(X="numeric", Y="numeric", quantiles="matrix", alpha="numeric"))
 setOldClass('pointfore')
 setClass("estimated_levels", slots=list(x.grid="numeric", alpha_x="numeric", alpha_gmm="numeric", 
-                                        gmm="logical", res_parametric='pointfore', forec="numeric"))
+                                        gmm="logical", res_parametric='pointfore', forec="numeric",
+                                        percentiles="matrix", obs="numeric"))
 
 #X: Vector of forecasts, Y: Vector of observations, 
 #alpha: vector of quantile levels
@@ -35,9 +40,12 @@ plot.quantiles <- function(x) {
   data <- cbind(data, x@quantiles)
   data <- melt(data, id.vars = c('X', 'Y'))
   p <- ggplot() + 
-    geom_line(data=data, aes(x=X, y=value, color=variable), size=0.5) +
+    geom_line(data=data, aes(x=X, y=value, color=variable), 
+              size=0.5) +
     geom_abline(slope = 1, intercept = 0, linetype='dashed') +
-    scale_color_discrete(name=expression(alpha), labels=paste(x@alpha)) +
+    scale_color_discrete(name=expression(alpha), 
+                         labels=paste(x@alpha)) +
+    guides(color = guide_legend(reverse = TRUE)) + 
     xlab('x') + 
     ylab('Y') 
 
@@ -50,7 +58,8 @@ plot.quantiles <- function(x) {
 #gmm: logical, If TRUE: Additionally estimate quantile level parametrically with PointFore
 #extrapolate: logical if TRUE: take a grid of x-values between min(forec) and  max(forec)
               #Otherwise take forecast values
-estimate_quantile_level <- function(forec, obs, N.grid.x=100, gmm=TRUE, extrapolate=TRUE) {
+#percentiles: liogical if TRUE: Calculate and return conditional quantiles at 0.1,...,0.9
+estimate_quantile_level <- function(forec, obs, N.grid.x=100, gmm=TRUE, extrapolate=TRUE, percentiles=TRUE) {
   #Define grids for alpha and x
   alpha.grid <- seq(0.01, 0.99, 0.01)  ##grid of quantile levels
   
@@ -102,8 +111,14 @@ estimate_quantile_level <- function(forec, obs, N.grid.x=100, gmm=TRUE, extrapol
     
     alpha_gmm <- probit_linear(x.grid, theta = c(theta1, theta2))
     
+    if (percentiles==TRUE) {
+      prediction2 <- predict(fit, data = data.frame(X=forec))
+      perc <- qpred(prediction2, quantiles = seq(0.1,0.9,0.1))
+    }
+    
     res <- new('estimated_levels', x.grid = x.grid, alpha_x=alpha_x, 
-               alpha_gmm=alpha_gmm, gmm=gmm, res_parametric=res_parametric, forec=forec)
+               alpha_gmm=alpha_gmm, gmm=gmm, res_parametric=res_parametric, 
+               forec=forec, percentiles=perc, obs=obs)
     
     return(res)
   }
@@ -114,7 +129,9 @@ estimate_quantile_level <- function(forec, obs, N.grid.x=100, gmm=TRUE, extrapol
 #pdf: logical, if TRUE marginal pdf of x is plotted
 #conf_level: vector specifiying confident intervall
 #hline: logical, if TRUE hotizontal line at 0.5 is plotted
-plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9), hline=TRUE) {
+#percentiles: logical, of TRUE add conditional quantile plot
+plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9), 
+                                hline=TRUE, percentiles=TRUE, add.info=TRUE) {
   interval_state <- seq(quantile(x@res_parametric$stateVariable, probs = 0.01),quantile(x@res_parametric$stateVariable, probs = 0.99), length.out=100)
   limits <- interval_state[c(1,length(interval_state))]
   
@@ -146,6 +163,69 @@ plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9), hline=TRUE)
   
   if(hline==TRUE) {
     p <- p + geom_hline(yintercept = 0.5, linetype=2)
+  }
+  
+  #Add legend 1
+  p <- p + scale_color_manual(name='', 
+                       values=c('alpha_x'='red', 
+                                'alpha_gmm'='blue', 
+                                'pdf estimate of x'='darkgreen'),
+                       labels=c('alpha_gmm' = 'estimated quantile level GMM \nwith 60 and 90 percent \nconfidence intervalls',
+                                'alpha_x' = 'estimated quantile level IDR', 
+                                'pdf estimate of x' = 'pdf estimate of x')) +
+    theme(panel.background = element_rect(fill = "gray90"),
+          #legend.position=c(0.76,0.3),
+          legend.position = 'bottom',
+          legend.title = element_blank(),
+          legend.background = element_rect(color = "black", fill = "gray90", 
+                                           size = 0.5, linetype = "solid"),
+          legend.key = element_rect(fill = "gray90", color = NaN),
+          legend.key.width = unit(0.9,"line")) +
+    new_scale('color')
+  
+  
+  if(percentiles==TRUE) {
+    data_perc <- data.frame('X'=x@forec, 'Y'=x@obs)
+    data_perc <- cbind(data_perc, x@percentiles)
+    data_perc <- melt(data_perc, id.vars = c('X', 'Y'))
+    p <- p + 
+      geom_line(data=data_perc, aes(x=X, y=scaleTR(value), color=variable), 
+                size=0.5) +
+      #geom_abline(slope = 1, intercept = 0, linetype='dashed') +
+      scale_color_discrete(name=expression(alpha), 
+                           labels=paste(seq(0.1,0.9,0.1))) +
+      guides(color = guide_legend(reverse = TRUE)) + 
+      theme(legend.position = 'right') 
+      #xlab('x')
+      #ylab('Y') 
+  }
+  
+ 
+  if (add.info==TRUE) {
+    #Calculate proportion of zeros in x and y and p-values
+    zeros_X <- round((sum(na.omit(x@forec)==0)/length(x@forec))*100, digits=2)
+    zeros_Y <- round((sum(na.omit(x@obs)==0)/length(x@obs))*100, digits=2)
+    p_opt <- round(summary(x@res_parametric)$Jtest$test[1,2], digits=2)
+    p_wald <- round(unname(attr(linearHypothesis(x@res_parametric$gmm, 'Theta[2]=0'), 'value')[1,1]),
+                    digits=2)
+    
+    
+    #Create Text
+    grob_p_opt <- grobTree(textGrob(bquote(p[J] * ' = ' * .(p_opt)), x=0.1, y=0.95, hjust=0,
+                           gp=gpar(col="black", fontsize=10, fontface="italic")))
+    grob_p_wald <- grobTree(textGrob(bquote(p[W] * ' = ' * .(p_wald)), x=0.1, y=0.9, hjust=0,
+                                    gp=gpar(col="black", fontsize=10, fontface="italic")))
+    grob_pointmass_x <- grobTree(textGrob(bquote('% 0 in x: ' * .(zeros_X)), x=0.1,  y=0.85, hjust=0,
+                                          gp=gpar(col="black", fontsize=10, fontface="italic")))
+    grob_pointmass_y <- grobTree(textGrob(bquote('% 0 in y: ' * .(zeros_Y)), x=0.1,  y=0.8, hjust=0,
+                                          gp=gpar(col="black", fontsize=10, fontface="italic")))
+    
+    #Add Text to Plot
+    p <- p + 
+      annotation_custom(grob_p_opt) +
+      annotation_custom(grob_p_wald) +
+      annotation_custom(grob_pointmass_x) +
+      annotation_custom(grob_pointmass_y)
   }
   
   #conf intervalls
@@ -181,20 +261,32 @@ plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9), hline=TRUE)
 
   
   #add legend
-  p <-  p + scale_color_manual(name='', 
-                              values=c('alpha_x'='red', 
-                                       'alpha_gmm'='blue', 
-                                       'pdf estimate of x'='darkgreen'),
-                               labels=c('alpha_gmm' = 'estimated quantile level GMM \nwith 60 and 90 percent \nconfidence intervalls',
-                                        'alpha_x' = 'estimated quantile level IDR', 
-                                        'pdf estimate of x' = 'pdf estimate of x')) 
+  #p <-  p + scale_color_manual(name='', 
+  #                            values=c('alpha_x'='red', 
+  #                                     'alpha_gmm'='blue', 
+  #                                     'pdf estimate of x'='darkgreen'),
+  #                             labels=c('alpha_gmm' = 'estimated quantile level GMM \nwith 60 and 90 percent \nconfidence intervalls',
+  #                                      'alpha_x' = 'estimated quantile level IDR', 
+  #                                      'pdf estimate of x' = 'pdf estimate of x')) +
+  #  theme(panel.background = element_rect(fill = "gray90"),
+  #        legend.position=c(0.76,0.3),
+  #        legend.title = element_blank(),
+  #        legend.background = element_rect(color = "black", fill = "gray90", 
+  #                                         size = 0.5, linetype = "solid"),
+  #        legend.key = element_rect(fill = "gray90", color = NaN),
+  #        legend.key.width = unit(1.2,"line")) +
+  #  new_scale("color") + 
+  #  scale_color_discrete(name=expression(alpha), 
+  #                       labels=paste(seq(0.1,0.9,0.1))) +
+  #  guides(color = guide_legend(reverse = TRUE)) + 
+    
   
   return(p)
 }
 
 ###precipitation
 #res1 <- estimate_quantiles(precipitation$X, precipitation$Y)
-#plot.quantiles(res1)
+#p1 <- plot.quantiles(res1)
 #res2 <- estimate_quantile_level(precipitation$X, precipitation$Y)
 #plot.quantile_level(res2)
 
@@ -205,18 +297,20 @@ plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9), hline=TRUE)
 #res2 <- estimate_quantile_level(GDP$forecast, GDP$observation)
 #plot.quantile_level(res2)
 
-###ERA5 - Brasilien
-#load('Data/precip_era5_025_025_24_2007-2018_-53.5_-6.Rdata')
+###ERA5
+##Brasilien
+load('Data/precip_era5_025_025_24_2007-2018_-53.25_-5.75.Rdata')
 #res1 <- estimate_quantiles(precip$HRES, precip$OBS*1000)
-#plot.quantiles(res1)
-#res2 <- estimate_quantile_level(precip$HRES, precip$OBS*1000)
-#plot.quantile_level(res2)
+##andere
+load('Data/precip_era5_025_025_24_2007-2018_103.25_-2.75.Rdata')
+res2 <- estimate_quantile_level(precip$HRES, precip$OBS*1000)
+plot.quantile_level(res2)
 
 ###TRMM - Brasilien
-load('Data/preD_TRMM_025_025_ECMWF_24_1998-2017_-53.375_-5.875.Rdata')
-T <- length(precipData$HRES)
-res1 <- estimate_quantiles(precipData$HRES[2:T], precipData$OBS[2:T])
-plot.quantiles(res1)
-res2 <- estimate_quantile_level(precipData$HRES[2:T], precipData$OBS[2:T])
-plot.quantile_level(res2)
+#load('Data/preD_TRMM_025_025_ECMWF_24_1998-2017_-53.375_-5.875.Rdata')
+#T <- length(precipData$HRES)
+#res1 <- estimate_quantiles(precipData$HRES[2:T], precipData$OBS[2:T])
+#plot.quantiles(res1)
+#res2 <- estimate_quantile_level(precipData$HRES[2:T], precipData$OBS[2:T])
+#plot.quantile_level(res2)
 
