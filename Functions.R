@@ -17,7 +17,7 @@ setClass("estimated_levels", slots=list(x.grid="numeric", alpha_x="numeric", alp
                                         gmm="logical", res_parametric='pointfore', forec="numeric",
                                         percentiles="matrix", obs="numeric"))
 
-#X: Vector of forecasts, Y: Vector of observations, 
+#forec: Vector of forecasts, obs: Vector of observations, 
 #alpha: vector of quantile levels
 estimate_quantiles <- function(forec, obs, alpha=seq(0.1,0.9,0.1)) {
   #Initialize vector for alpha(x)
@@ -126,7 +126,8 @@ estimate_quantile_level <- function(forec, obs, N.grid.x=100, gmm=TRUE, extrapol
     theta2 <- summary(res_parametric)$coefficients[2,1]
     
     
-    alpha_gmm <- probit_linear(x.grid, theta = c(theta1, theta2))
+    #alpha_gmm <- probit_linear(x.grid, theta = c(theta1, theta2))
+    alpha_gmm <- probit0(x.grid, theta = c(theta1, theta2))
     
     if (percentiles==TRUE) {
       prediction2 <- predict(fit, data = data.frame(X=forec))
@@ -148,7 +149,7 @@ estimate_quantile_level <- function(forec, obs, N.grid.x=100, gmm=TRUE, extrapol
 #hline: logical, if TRUE hotizontal line at 0.5 is plotted
 #percentiles: logical, of TRUE add conditional quantile plot
 plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9), 
-                                hline=TRUE, percentiles=TRUE, add.info=TRUE) {
+                                hline=TRUE, percentiles=FALSE, add.info=TRUE) {
   interval_state <- seq(quantile(x@res_parametric$stateVariable, probs = 0.01),
                         quantile(x@res_parametric$stateVariable, probs = 0.99), 
                         length.out=100) 
@@ -161,9 +162,10 @@ plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9),
   data <- melt(data, id.vars = c('x'))
 
   p <- ggplot() + 
-    geom_line(data = data, aes(x=x, y=value, col=variable), size=0.5) +
+    geom_line(data = data[data$x>0,], aes(x=x, y=value, col=variable), size=0.5) +
     ylim(0,1) +
     xlim(limits) +
+    #coord_cartesian(xlim=c(0.0001,limits[2])) + 
     ylab(expression(alpha(x)))
 
   
@@ -173,12 +175,20 @@ plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9),
   
   if(pdf==TRUE) {
     p <- p + geom_density(data = data.frame(x@forec[x@forec>0]),
-                          aes(x=x@forec[x@forec>0], y=..scaled..),
+                          aes(x=x@forec[x@forec>0], y=..density..),
                           fill = 'green',
                           alpha=.2,
                           show.legend = FALSE) +
-      stat_density(aes(x@forec[x@forec>0], y=..scaled.., col='pdf estimate of x'),
-                       geom='line', position='identity')
+      stat_density(aes(x@forec[x@forec>0], y=..density.., col='pdf estimate of x|x>0'),
+                       geom='line', position='identity') + 
+      geom_density(data=data.frame(x@obs[x@obs>0]),
+                   aes(x=x@obs[x@obs>0], y=..density..),
+                       fill = 'yellow4',
+                       alpha=.2,
+                       show.legend = FALSE) + 
+      stat_density(aes(x@obs[x@obs>0], y=..density.., col='pdf estimate of y|y>0'),
+                   geom='line', position='identity')
+    
   }
   
   if(hline==TRUE) {
@@ -189,10 +199,12 @@ plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9),
   p <- p + scale_color_manual(name='', 
                        values=c('alpha_x'='red', 
                                 'alpha_gmm'='blue', 
-                                'pdf estimate of x'='darkgreen'),
+                                'pdf estimate of x|x>0'='darkgreen',
+                                'pdf estimate of y|y>0'='yellow4'),
                        labels=c('alpha_gmm' = 'estimated quantile level GMM \nwith 60 and 90 percent \nconfidence intervals',
                                 'alpha_x' = 'estimated quantile level IDR', 
-                                'pdf estimate of x' = 'pdf estimate of x')) +
+                                'pdf estimate of x|x>0' = 'pdf estimate of x|x>0',
+                                'pdf estimate of y|y>0' = 'pdf estimate of y|y>0')) +
     theme(legend.justification = "left")
     #theme(panel.background = element_rect(fill = "gray90"),
     #      legend.position=c(0.76,0.3),
@@ -255,9 +267,9 @@ plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9),
       #annotation_custom(grob_pointmass_y)
     
     #Add Point Mass in 0
-    p <- p + 
-      geom_point(aes(x=0, y=zeros_X), color='darkgreen', shape=19, size=1) + 
-      geom_point(aes(x=0, y=zeros_Y), color='yellow4', shape=19, size=1)
+    #p <- p + 
+      #geom_point(aes(x=0, y=zeros_X), color='darkgreen', shape=19, size=1) + 
+      #geom_point(aes(x=0, y=zeros_Y), color='yellow4', shape=19, size=1)
       #geom_segment(aes(x=0, xend=0, y=0, yend=zeros_X), color='darkgreen') +
       #geom_segment(aes(x=0, xend=0, y=0, yend=zeros_Y), color='darkblue')
       
@@ -292,8 +304,14 @@ plot.quantile_level <- function(x, pdf=TRUE, conf.levels=c(0.6,0.9),
   
   p <- p +
     #geom_line(data=plot_data, aes(x=interval_state, y=alpha_int), size=1.2)+
-    geom_ribbon(data=plot_data, aes(x=interval_state,ymin=alpha_low,ymax=alpha_high), alpha=0.4)+
-    geom_ribbon(data=plot_data, aes(x=interval_state,ymin=alpha_low2,ymax=alpha_high2), alpha=0.2)
+    geom_ribbon(data=plot_data[which(plot_data>0),], aes(x=interval_state,ymin=alpha_low,ymax=alpha_high), alpha=0.4) +
+    geom_ribbon(data=plot_data[which(plot_data>0),], aes(x=interval_state,ymin=alpha_low2,ymax=alpha_high2), alpha=0.2) 
+    #coord_cartesian(xlim=c(0.0001, limits[2]))
+  
+  #Add Point Mass in 0
+  p <- p + 
+  geom_point(aes(x=0, y=zeros_X), color='darkgreen', shape=19, size=1) + 
+  geom_point(aes(x=0, y=zeros_Y), color='yellow4', shape=19, size=1)
   
 
   
